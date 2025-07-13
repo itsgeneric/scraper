@@ -1,2 +1,5 @@
 #Python Interpreter files
 .venv
+
+IDE files
+.idea
