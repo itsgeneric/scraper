@@ -33,8 +33,15 @@ session.mount("https://", HTTPAdapter(max_retries=retries))
 # Wikipedia API setup
 wiki_api = wikipediaapi.Wikipedia(
     language="en",
-    user_agent="KnowledgeBaseScraper/1.0 (https://example.com)"
+    user_agent="KnowledgeBaseScraper/1.0[](https://example.com)"
 )
+
+def estimate_total_rows(wiki_max_articles, tech_max_articles_per_site, tech_sources):
+    """Estimate the total number of data rows to be generated."""
+    wiki_rows = wiki_max_articles
+    tech_rows = tech_max_articles_per_site * len(tech_sources)
+    total_rows = wiki_rows + tech_rows
+    return total_rows
 
 def get_wikipedia_articles(max_articles=10000, max_depth=3):
     """Recursively collect articles from Wikipedia's Computer science category and subcategories."""
@@ -147,7 +154,7 @@ def extract_tech_doc_data(url, source):
         print(f"[!] Error extracting {source} page {url}: {e}")
         return None
 
-def save_to_csv(data, filename="tech_docs.csv"):
+def save_to_csv(data, filename="knowledge_base.csv"):
     """Save the scraped data to a CSV file."""
     keys = ["title", "content", "date", "url", "domain", "source"]
     with open(filename, "w", newline='', encoding="utf-8") as f:
@@ -160,23 +167,32 @@ def save_to_csv(data, filename="tech_docs.csv"):
 
 def main():
     """Main function to orchestrate the scraping and saving process."""
-    # Step 1: Collect Wikipedia articles
-    wiki_data = get_wikipedia_articles(max_articles=10000, max_depth=3)
-
-    # Step 2: Collect and extract data from technical documentation sites
+    # Configurable limits
+    wiki_max_articles = 10000
+    tech_max_articles_per_site = 100
     tech_sources = ["mdn", "tensorflow", "kubernetes", "github", "docker"]
+
+    # Step 1: Estimate and display the target number of rows
+    estimated_rows = estimate_total_rows(wiki_max_articles, tech_max_articles_per_site, tech_sources)
+    print(f"[*] Estimated total data rows to be generated: {estimated_rows}")
+
+    # Step 2: Collect Wikipedia articles
+    wiki_data = get_wikipedia_articles(max_articles=wiki_max_articles, max_depth=3)
+
+    # Step 3: Collect and extract data from technical documentation sites
     tech_data = []
     for source in tech_sources:
         base_url = BASE_URLS[source]
-        article_urls = get_tech_doc_links(base_url, source, max_articles=100)
+        article_urls = get_tech_doc_links(base_url, source, max_articles=tech_max_articles_per_site)
         for url in article_urls:
             data = extract_tech_doc_data(url, source)
             if data:
                 tech_data.append(data)
             time.sleep(1.5)  # Polite delay
 
-    # Step 3: Combine and save data
+    # Step 4: Combine and save data
     all_data = wiki_data + tech_data
+    print(f"[+] Total data rows actually collected: {len(all_data)}")
     if all_data:
         save_to_csv(all_data)
     else:
