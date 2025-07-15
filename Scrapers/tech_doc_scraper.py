@@ -147,7 +147,7 @@ def extract_tech_doc_data(url, source):
         print(f"[!] Error extracting {source} page {url}: {e}")
         return None
 
-def save_to_csv(data, filename="knowledge_base.csv"):
+def save_to_csv(data, filename="tech_docs.csv"):
     """Save the scraped data to a CSV file."""
     keys = ["title", "content", "date", "url", "domain", "source"]
     with open(filename, "w", newline='', encoding="utf-8") as f:
