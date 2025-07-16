@@ -1,9 +1,10 @@
+import random
 import requests
 from bs4 import BeautifulSoup
 import csv
 import time
 from xml.etree import ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -28,7 +29,7 @@ def fetch_sitemap_urls(sitemap_url, limit=1000):
 
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def extract_article_data(url):
@@ -101,20 +102,132 @@ def save_csv(records, filename="apnews_articles.csv"):
         writer.writerows(records)
     print(f"[✓] Saved {len(records)} records to '{filename}'")
 
-def main():
-    sitemap = "https://apnews.com/news-sitemap-content.xml"
-    urls = fetch_sitemap_urls(sitemap, limit=1000)
-    data_records = []
 
-    for u in urls:
+def fetch_archive_articles(limit=1000):
+    """Scrape articles from AP News archive pages"""
+    base_url = "https://apnews.com"
+    article_urls = set()
+
+    # 1. Archive Crawling (Month-by-Month)
+    current_date = datetime.now()
+    months_to_check = 12  # Go back 12 months
+
+    for i in range(months_to_check):
+        if len(article_urls) >= limit:
+            break
+
+        date = current_date -   timedelta(days = 30 * i)
+        archive_url = f"{base_url}/hub/archives?month={date.month}&year={date.year}"
+
         try:
-            record = extract_article_data(u)
-            data_records.append(record)
+            print(f"Checking archive: {date.strftime('%B %Y')}")
+            res = requests.get(archive_url, headers = HEADERS, timeout = 15)
+            soup = BeautifulSoup(res.text, "html.parser")
+
+            for link in soup.select('a[href*="/article/"]:not([href*="/live/"])'):
+                full_url = urljoin(base_url, link['href'])
+                article_urls.add(full_url)
+                if len(article_urls) >= limit:
+                    break
+
+            time.sleep(1 + random.random())
         except Exception as e:
-            print(f"[!] Failed to scrape {u}: {e}")
-        time.sleep(0.5)
+            print(f"Archive failed for {date.strftime('%B %Y')}: {e}")
+
+    # 2. Aggressive Topic Hub Crawling
+    if len(article_urls) < limit:
+        hubs = [
+            "politics", "business", "technology", "science",
+            "entertainment", "sports", "health", "europe",
+            "asia-pacific", "latin-america", "africa"
+        ]
+
+        for hub in hubs:
+            if len(article_urls) >= limit:
+                break
+
+            hub_url = f"{base_url}/hub/{hub}"
+            try:
+                print(f"Scraping hub: {hub}")
+                res = requests.get(hub_url, headers = HEADERS, timeout = 15)
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                # Get all pagination pages (up to 5 pages per hub)
+                for page in range(1, 6):
+                    if len(article_urls) >= limit:
+                        break
+
+                    page_url = f"{hub_url}?page={page}"
+                    res = requests.get(page_url, headers = HEADERS, timeout = 15)
+                    soup = BeautifulSoup(res.text, "html.parser")
+
+                    for link in soup.select('a[href*="/article/"]:not([href*="/live/"])'):
+                        full_url = urljoin(base_url, link['href'])
+                        article_urls.add(full_url)
+                        if len(article_urls) >= limit:
+                            break
+
+                    time.sleep(1 + random.random())
+            except Exception as e:
+                print(f"Hub {hub} failed: {e}")
+
+    # 3. Related Articles Extraction
+    if len(article_urls) < limit:
+        # Make a copy to avoid modifying set during iteration
+        existing_urls = list(article_urls)[:100]  # Check first 100 articles
+        for url in existing_urls:
+            if len(article_urls) >= limit:
+                break
+
+            try:
+                print(f"Checking related articles for: {url[:60]}...")
+                res = requests.get(url, headers = HEADERS, timeout = 15)
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                for link in soup.select('a[href*="/article/"]:not([href*="/live/"])'):
+                    full_url = urljoin(base_url, link['href'])
+                    article_urls.add(full_url)
+                    if len(article_urls) >= limit:
+                        break
+
+                time.sleep(1 + random.random())
+            except Exception as e:
+                print(f"Failed to get related articles for {url}: {e}")
+
+    return list(article_urls)[:limit]
+# (Keep your existing fetch_sitemap_urls, extract_article_data, save_csv functions)
+
+def main():
+    print("🚀 Starting URL discovery...")
+    urls = fetch_archive_articles(limit = 1000)
+    print(f"\nFound {len(urls)} article URLs. Sample:")
+    for url in urls[:5]:
+        print(f"  → {url}")
+
+    # SANITY CHECK
+    confirmation = input("\nType 'yes' to proceed with scraping (or anything else to abort): ").strip().lower()
+    if confirmation != "yes":
+        print("❌ Aborted by user")
+        return
+
+    print("\n⏳ Starting article scraping...")
+    data_records = []
+    for i, url in enumerate(urls, 1):
+        try:
+            print(f"Processing {i}/{len(urls)}: {url[:80]}...")
+            record = extract_article_data(url)
+            if record and record.get('content'):
+                data_records.append(record)
+        except Exception as e:
+            print(f"⚠️ Failed on {url}: {e}")
+
+        # Dynamic delay
+        delay = 0.5 + (0.5 if i % 100 == 0 else 0)
+        time.sleep(delay + random.random() * 0.5)
 
     save_csv(data_records)
+    print("✅ All done!")
+
 
 if __name__ == "__main__":
     main()
