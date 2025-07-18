@@ -10,6 +10,7 @@ csv_files = [
     "/Users/user/Downloads/scraper/Datasets/tribunal_docs_clean.csv",
     "/Users/user/Downloads/scraper/Datasets/wanderingearl_blogs.csv",
     "/Users/user/Downloads/scraper/Datasets/wikipedia_articles.csv",
+    "/Users/user/Downloads/scraper/Datasets/sciencedaily.csv",
 ]
 
 total_rows = 0
