@@ -1,6 +1,6 @@
 import csv
 
-input_file = "/Users/user/Downloads/scraper/Scrapers/tribunal_docs.csv"
+input_file = "/Users/user/Downloads/scraper/Scrapers/sciencedaily.csv"
 output_file = "tribunal_docs_clean.csv"
 
 with open(input_file, newline='', encoding='utf-8') as infile, open(output_file, mode='w', newline='', encoding='utf-8') as outfile:
