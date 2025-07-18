@@ -1,7 +1,7 @@
 import csv
 
-input_file = "/Users/user/Downloads/scraper/Scrapers/sciencedaily.csv"
-output_file = "tribunal_docs_clean.csv"
+input_file = "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/papers.csv"
+output_file = "../Datasets/papers_clean.csv"
 
 with open(input_file, newline='', encoding='utf-8') as infile, open(output_file, mode='w', newline='', encoding='utf-8') as outfile:
     reader = csv.DictReader(infile)
