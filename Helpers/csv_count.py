@@ -5,14 +5,16 @@ import os
 csv_files = [
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/ap_news_articles.csv",
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/finance.csv",
-    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/papers.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/legal_gov.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/research_papers.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/sciencedaily.csv",
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/tech_docs.csv",
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/tngo_articles.csv",
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/tribunal_docs.csv",
-    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/wanderingearl_blogs.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/wanderingearl.csv",
     "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/wikipedia_articles_1.csv",
-    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/sciencedaily.csv",
-    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/legal_gov.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/wikipedia_articles_2.csv",
+    "D:/BNMIT/Semester 7/Final Year Project/scraper/Datasets/worldhistory.csv",
 ]
 
 total_rows = 0
