@@ -94,7 +94,7 @@ def extract_article_data(url):
         "categories": category
     }
 
-def save_csv(records, filename="apnews_articles.csv"):
+def save_csv(records, filename="ap_news_articles.csv"):
     keys = ["title", "content", "date", "url", "author", "domain", "categories"]
     with open(filename, "w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=keys)

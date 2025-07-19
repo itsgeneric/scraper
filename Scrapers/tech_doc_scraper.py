@@ -1,328 +1,164 @@
 import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from collections import deque
+from datetime import datetime
 import csv
+import os
 import time
 import argparse
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from collections import deque
 
-# Set up session with retries
-session = requests.Session()
-retries = Retry(total=3, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
-session.mount("https://", HTTPAdapter(max_retries=retries))
-
-# Headers for scraping
+# ------------------ Config ------------------ #
 HEADERS = {
-    "User-Agent": "TechDocsScraper/1.0 (https://example.com; contact@example.com)",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5"
+    "User-Agent": "Mozilla/5.0 (compatible; TechDocsScraper/1.0)"
 }
+OUTPUT_FILE = "../Datasets/tech_docs.csv"
+os.makedirs("scraped_data", exist_ok=True)
+FIELDNAMES = ["title", "content", "date", "url", "author", "domain", "categories"]
+SESSION = requests.Session()
 
-def estimate_total_rows(max_mdn, max_python, max_kubernetes, max_docker):
-    """Estimate the total number of data rows to be generated."""
-    total_rows = max_mdn + max_python + max_kubernetes + max_docker
-    return total_rows
+# ------------------ Utils ------------------ #
+def get_date():
+    return datetime.utcnow().strftime("%Y-%m-%d")
 
-def fetch_mdn_content(max_pages=8000, max_depth=2):
-    """Scrape tutorials, API references, and code snippets from MDN Web Docs."""
-    print("[*] Collecting MDN Web Docs content...")
+def clean_text(text):
+    return text.strip().replace("\n", " ").replace("\r", "")[:5000] if text else "N/A"
+
+def extract_domain(url):
+    return urlparse(url).netloc
+
+# ------------------ Scraper Core ------------------ #
+def scrape_site(start_urls, base_url, source_name, path_func, max_pages, max_depth=2):
+    print(f"🔍 Scraping: {source_name}")
     content = []
-    visited_urls = set()
-    base_url = "https://developer.mozilla.org"
-    start_urls = [
-        f"{base_url}/en-US/docs/Web",
-        f"{base_url}/en-US/docs/Learn"
-    ]
+    visited = set()
     queue = deque([(url, 0) for url in start_urls])
     count = 0
 
     while queue and count < max_pages:
         url, depth = queue.popleft()
-        if url in visited_urls or depth > max_depth:
+        if url in visited or depth > max_depth:
             continue
-        visited_urls.add(url)
+        visited.add(url)
+
         try:
-            response = session.get(url, headers=HEADERS, timeout=20)
+            response = SESSION.get(url, headers=HEADERS, timeout=15)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Extract title
+            # Title
             title_tag = soup.find("h1")
-            title = title_tag.get_text(strip=True) if title_tag else "N/A"
+            title = clean_text(title_tag.get_text()) if title_tag else "Untitled"
 
-            # Extract content
-            content_div = soup.find("main") or soup.find("div", class_=lambda x: x and "content" in x.lower())
-            if content_div:
-                for unwanted in content_div.find_all(["nav", "aside", "footer", "script"]):
-                    unwanted.decompose()
-                text = content_div.get_text(separator="\n", strip=True)[:10000]
-            else:
-                text = "N/A"
+            # Content
+            main = soup.find("main") or soup.select_one("div.body") or soup.select_one("div.content")
+            if not main:
+                continue
 
-            if title != "N/A" and text != "N/A":
-                content.append({
-                    'title': title,
-                    'content': text,
-                    'url': url,
-                    'source': 'MDN Web Docs'
-                })
-                count += 1
-                print(f"[+] Collected MDN content: {title}")
+            for bad in main.select("nav, aside, footer, script, style"):
+                bad.decompose()
 
-            # Collect subpage URLs
-            links = soup.find_all("a", href=True)
-            print(f"[*] Found {len(links)} links on {url}")
-            for link in links:
-                href = link['href']
-                if href.startswith("/en-US/docs/"):
-                    sub_url = urljoin(base_url, href)
-                    if sub_url not in visited_urls and count < max_pages and depth < max_depth:
-                        queue.append((sub_url, depth + 1))
-            time.sleep(0.5)  # Rate limiting
+            body = clean_text(main.get_text(separator="\n", strip=True))
+            if len(body) < 50:
+                continue
+
+            record = {
+                "title": title,
+                "content": body,
+                "date": get_date(),
+                "url": url,
+                "author": source_name + " Docs Team",
+                "domain": extract_domain(url),
+                "categories": source_name.lower()
+            }
+
+            content.append(record)
+            count += 1
+            print(f"[+] ({count}) {title[:60]}...")
+
+            if count >= max_pages:
+                break
+
+            # Enqueue sub-URLs
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if path_func(href):
+                    full_url = urljoin(base_url, href)
+                    if full_url not in visited:
+                        queue.append((full_url, depth + 1))
+
+            time.sleep(0.5)
+
         except Exception as e:
-            print(f"[!] Error scraping MDN content {url}: {e}")
+            print(f"[❌] Failed to scrape {url}: {str(e)}")
             continue
 
-    print(f"[+] Total MDN content collected: {len(content)}")
     return content
 
-def fetch_python_docs(max_pages=2000, max_depth=2):
-    """Scrape tutorials, references, and code snippets from Python Docs."""
-    print("[*] Collecting Python Docs content...")
-    content = []
-    visited_urls = set()
-    base_url = "https://docs.python.org"
-    start_urls = [
-        f"{base_url}/3/tutorial/",
-        f"{base_url}/3/library/",
-        f"{base_url}/3/howto/"
-    ]
-    queue = deque([(url, 0) for url in start_urls])
-    count = 0
+# ------------------ Site Definitions ------------------ #
+def scrape_mdn(max_pages=400):
+    base = "https://developer.mozilla.org"
+    start = [f"{base}/en-US/docs/Web", f"{base}/en-US/docs/Learn"]
+    return scrape_site(start, base, "MDN", lambda h: h.startswith("/en-US/docs/"), max_pages)
 
-    while queue and count < max_pages:
-        url, depth = queue.popleft()
-        if url in visited_urls or depth > max_depth:
-            continue
-        visited_urls.add(url)
-        try:
-            response = session.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
+def scrape_python_docs(max_pages=400):
+    base = "https://docs.python.org"
+    start = [f"{base}/3/tutorial/", f"{base}/3/library/", f"{base}/3/howto/"]
+    return scrape_site(start, base, "Python", lambda h: h.startswith("/3/"), max_pages)
 
-            # Extract title
-            title_tag = soup.find("h1")
-            title = title_tag.get_text(strip=True) if title_tag else "N/A"
+def scrape_kubernetes_docs(max_pages=300):
+    base = "https://kubernetes.io"
+    start = [f"{base}/docs/home/"]
+    return scrape_site(start, base, "Kubernetes", lambda h: h.startswith("/docs/"), max_pages)
 
-            # Extract content
-            content_div = soup.find("div", class_="body") or soup.find("main")
-            if content_div:
-                for unwanted in content_div.find_all(["nav", "aside", "footer", "script"]):
-                    unwanted.decompose()
-                text = content_div.get_text(separator="\n", strip=True)[:10000]
-            else:
-                text = "N/A"
+def scrape_docker_docs(max_pages=300):
+    base = "https://docs.docker.com"
+    start = [f"{base}/"]
+    return scrape_site(start, base, "Docker", lambda h: h.startswith("/"), max_pages)
 
-            if title != "N/A" and text != "N/A":
-                content.append({
-                    'title': title,
-                    'content': text,
-                    'url': url,
-                    'source': 'Python Docs'
-                })
-                count += 1
-                print(f"[+] Collected Python Docs content: {title}")
+# ------------------ Saver ------------------ #
+def save_to_csv(data):
+    unique = []
+    seen = set()
+    for row in data:
+        key = (row["url"].strip(), row["title"])
+        if all(row[f] and row[f] != "N/A" for f in FIELDNAMES) and key not in seen:
+            unique.append(row)
+            seen.add(key)
 
-            # Collect subpage URLs
-            links = soup.find_all("a", href=True)
-            print(f"[*] Found {len(links)} links on {url}")
-            for link in links:
-                href = link['href']
-                if href.startswith("/3/"):
-                    sub_url = urljoin(base_url, href)
-                    if sub_url not in visited_urls and count < max_pages and depth < max_depth:
-                        queue.append((sub_url, depth + 1))
-            time.sleep(0.5)  # Rate limiting
-        except Exception as e:
-            print(f"[!] Error scraping Python Docs content {url}: {e}")
-            continue
-
-    print(f"[+] Total Python Docs content collected: {len(content)}")
-    return content
-
-def fetch_kubernetes_docs(max_pages=1000, max_depth=2):
-    """Scrape tutorials and references from Kubernetes Docs."""
-    print("[*] Collecting Kubernetes Docs content...")
-    content = []
-    visited_urls = set()
-    base_url = "https://kubernetes.io"
-    start_url = f"{base_url}/docs/home/"
-    queue = deque([(start_url, 0)])
-    count = 0
-
-    while queue and count < max_pages:
-        url, depth = queue.popleft()
-        if url in visited_urls or depth > max_depth:
-            continue
-        visited_urls.add(url)
-        try:
-            response = session.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Extract title
-            title_tag = soup.find("h1")
-            title = title_tag.get_text(strip=True) if title_tag else "N/A"
-
-            # Extract content
-            content_div = soup.find("main") or soup.find("div", class_=lambda x: x and "content" in x.lower())
-            if content_div:
-                for unwanted in content_div.find_all(["nav", "aside", "footer", "script"]):
-                    unwanted.decompose()
-                text = content_div.get_text(separator="\n", strip=True)[:10000]
-            else:
-                text = "N/A"
-
-            if title != "N/A" and text != "N/A":
-                content.append({
-                    'title': title,
-                    'content': text,
-                    'url': url,
-                    'source': 'Kubernetes Docs'
-                })
-                count += 1
-                print(f"[+] Collected Kubernetes Docs content: {title}")
-
-            # Collect subpage URLs
-            links = soup.find_all("a", href=True)
-            print(f"[*] Found {len(links)} links on {url}")
-            for link in links:
-                href = link['href']
-                if href.startswith("/docs/"):
-                    sub_url = urljoin(base_url, href)
-                    if sub_url not in visited_urls and count < max_pages and depth < max_depth:
-                        queue.append((sub_url, depth + 1))
-            time.sleep(0.5)  # Rate limiting
-        except Exception as e:
-            print(f"[!] Error scraping Kubernetes Docs content {url}: {e}")
-            continue
-
-    print(f"[+] Total Kubernetes Docs content collected: {len(content)}")
-    return content
-
-def fetch_docker_docs(max_pages=1000, max_depth=2):
-    """Scrape tutorials and references from Docker Docs."""
-    print("[*] Collecting Docker Docs content...")
-    content = []
-    visited_urls = set()
-    base_url = "https://docs.docker.com"
-    start_url = f"{base_url}/"
-    queue = deque([(start_url, 0)])
-    count = 0
-
-    while queue and count < max_pages:
-        url, depth = queue.popleft()
-        if url in visited_urls or depth > max_depth:
-            continue
-        visited_urls.add(url)
-        try:
-            response = session.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Extract title
-            title_tag = soup.find("h1")
-            title = title_tag.get_text(strip=True) if title_tag else "N/A"
-
-            # Extract content
-            content_div = soup.find("main") or soup.find("div", class_=lambda x: x and "content" in x.lower())
-            if content_div:
-                for unwanted in content_div.find_all(["nav", "aside", "footer", "script"]):
-                    unwanted.decompose()
-                text = content_div.get_text(separator="\n", strip=True)[:10000]
-            else:
-                text = "N/A"
-
-            if title != "N/A" and text != "N/A":
-                content.append({
-                    'title': title,
-                    'content': text,
-                    'url': url,
-                    'source': 'Docker Docs'
-                })
-                count += 1
-                print(f"[+] Collected Docker Docs content: {title}")
-
-            # Collect subpage URLs
-            links = soup.find_all("a", href=True)
-            print(f"[*] Found {len(links)} links on {url}")
-            for link in links:
-                href = link['href']
-                if href.startswith("/"):
-                    sub_url = urljoin(base_url, href)
-                    if sub_url not in visited_urls and count < max_pages and depth < max_depth:
-                        queue.append((sub_url, depth + 1))
-            time.sleep(0.5)  # Rate limiting
-        except Exception as e:
-            print(f"[!] Error scraping Docker Docs content {url}: {e}")
-            continue
-
-    print(f"[+] Total Docker Docs content collected: {len(content)}")
-    return content
-
-def save_to_csv(data, filename="tech_docs.csv"):
-    """Save the scraped data to a CSV file."""
-    keys = ['source', 'title', 'content', 'url']
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=keys)
+    with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
-        for row in data:
-            writer.writerow(row)
-    print(f"[+] Data saved to {filename}")
+        writer.writerows(unique)
+    print(f"\n✅ Saved {len(unique)} unique technical docs to {OUTPUT_FILE}")
 
+# ------------------ Main ------------------ #
 def main():
-    """Main function to orchestrate the scraping and saving process."""
-    # Set up command-line argument parser
-    parser = argparse.ArgumentParser(description="Web scraper for programming and tech docs from MDN, Python, Kubernetes, and Docker.")
-    parser.add_argument("--max_mdn", type=int, default=8000,
-                        help="Maximum number of MDN Web Docs pages to fetch")
-    parser.add_argument("--max_python", type=int, default=2000,
-                        help="Maximum number of Python Docs pages to fetch")
-    parser.add_argument("--max_kubernetes", type=int, default=1000,
-                        help="Maximum number of Kubernetes Docs pages to fetch")
-    parser.add_argument("--max_docker", type=int, default=1000,
-                        help="Maximum number of Docker Docs pages to fetch")
+    parser = argparse.ArgumentParser(description="Scrape technical documentation into structured CSV")
+    parser.add_argument("--max_mdn", type=int, default=400)
+    parser.add_argument("--max_python", type=int, default=400)
+    parser.add_argument("--max_k8s", type=int, default=300)
+    parser.add_argument("--max_docker", type=int, default=300)
     args = parser.parse_args()
 
-    # Estimate and display the target number of data rows
-    estimated_rows = estimate_total_rows(args.max_mdn, args.max_python, args.max_kubernetes, args.max_docker)
-    print(f"[*] Estimated total data rows to be generated: {estimated_rows}")
+    print(f"🏁 Starting scrape to collect ~1000–1500 entries...\n")
 
-    # Fetch data from each source
-    mdn_content = fetch_mdn_content(max_pages=args.max_mdn, max_depth=2)
-    python_content = fetch_python_docs(max_pages=args.max_python, max_depth=2)
-    kubernetes_content = fetch_kubernetes_docs(max_pages=args.max_kubernetes, max_depth=2)
-    docker_content = fetch_docker_docs(max_pages=args.max_docker, max_depth=2)
+    data = []
+    data += scrape_mdn(args.max_mdn)
+    data += scrape_python_docs(args.max_python)
+    data += scrape_kubernetes_docs(args.max_k8s)
+    data += scrape_docker_docs(args.max_docker)
 
-    # Combine all data
-    all_data = []
-    for item in mdn_content + python_content + kubernetes_content + docker_content:
-        all_data.append({
-            'source': item['source'],
-            'title': item['title'],
-            'content': item['content'],
-            'url': item['url']
-        })
+    print(f"\n📦 Total collected before deduplication: {len(data)}")
 
-    # Save to CSV
-    if all_data:
-        save_to_csv(all_data)
+    save_to_csv(data)
+
+    if data:
+        print("\n📌 Sample:")
+        for k in FIELDNAMES:
+            print(f"{k}: {data[0][k][:100]}{'...' if len(data[0][k]) > 100 else ''}")
     else:
-        print("[!] No data collected from any source.")
-    print(f"[+] Total data rows actually collected: {len(all_data)}")
+        print("❌ No data scraped.")
 
-# Entry point
 if __name__ == "__main__":
     main()
