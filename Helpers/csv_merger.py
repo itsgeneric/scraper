@@ -1,11 +1,32 @@
 import pandas as pd
 import glob
+import os
 
-# List of CSV files to merge
-csv_files = ['ap_news_articles.csv', 'finance.csv', 'legal_gov.csv', 'papers.csv', 'research_papers.csv', 'sciencedaily.csv', 'tech_docs.csv', 'tngo_articles.csv', 'tribunal_docs.csv', 'wanderingearl.csv', 'wikipedia_articles_1.csv', 'worldhistory.csv']
+# Define the directory containing all your CSVs
+input_folder = "../Datasets"
+output_file = "../Datasets/merged.csv"
 
-# Read and concatenate all CSVs
-merged_df = pd.concat([pd.read_csv(file) for file in csv_files], ignore_index=True)
+# Use glob to get all CSV files in the directory
+csv_files = glob.glob(os.path.join(input_folder, "*.csv"))
 
-# Save to a new CSV file
-merged_df.to_csv('merged.csv', index=False)
+print(f"📂 Found {len(csv_files)} CSV files to merge:")
+for file in csv_files:
+    print(f" - {file}")
+
+# Read and concatenate all CSV files
+dfs = []
+for file in csv_files:
+    try:
+        df = pd.read_csv(file)
+        dfs.append(df)
+    except Exception as e:
+        print(f"⚠️ Failed to read {file}: {e}")
+
+# Merge and save
+if dfs:
+    merged_df = pd.concat(dfs, ignore_index=True)
+    merged_df.to_csv(output_file, index=False)
+    print(f"\n✅ Merged CSV saved as: {output_file}")
+    print(f"📊 Total rows: {len(merged_df)}")
+else:
+    print("❌ No valid CSVs found to merge.")
